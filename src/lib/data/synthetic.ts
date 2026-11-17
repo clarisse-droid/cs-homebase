@@ -128,3 +128,24 @@ export function syntheticChanges(now = new Date()) {
     ev("e10", "c09", "masterStatus", "Actively Looking", "Setting up units", 12),
   ];
 }
+
+/** SYNTHETIC rent-sheet units (invented), shaped like the parsed "Baetelle Master Rent Document". */
+export function syntheticSheet(now = new Date()): import("../sheets/rent").SheetData {
+  const month = now.toISOString().slice(0, 7);
+  const later = (days: number) => new Date(now.getTime() + days * 86_400_000).toISOString().slice(0, 10);
+  const u = (unit: string, building: string, sheetClient: string, leaseEnd: string | null, payBy: number, amount: string | null, paid: boolean, note: string | null = null) => ({
+    key: unit.toLowerCase().replace(/unit/g, "").replace(/[^a-z0-9]/g, ""), unit, building, sheetClient, leaseEnd, renewalContact: "Demo Property Co - Pat Manager", payByDay: payBy,
+    rent: { month, amount, paid, note },
+  });
+  return {
+    syncedAt: now.toISOString(), rentMonth: month, errors: [],
+    units: [
+      u("Harbor Lofts Unit 204", "Harbor Lofts", "Riley Chen - Demo Stays LP", later(140), 3, "$1,950.00", true),
+      u("Harbor Lofts Unit 312", "Harbor Lofts", "Riley Chen - Demo Stays LP", later(45), 3, "$2,010.00", false, "increase is due to a key replacement fee"),
+      u("Elm Street Unit 1102", "Elm Street", "Taylor Okafor - Okafor Homes", later(300), 5, "$2,400.00", true),
+      u("Elm Street Unit 1105", "Elm Street", "Taylor Okafor - Okafor Homes", later(20), 5, "$2,380.00", true),
+      u("Cedar Flats Unit 8", "Cedar Flats", "Sam Rivera - Rivera Rentals", later(200), 1, "$1,700.00", false),
+      u("Maple Court Unit 3", "Maple Court", "Jamie Doe - Unknown Stays", later(90), 5, "$1,500.00", true),
+    ],
+  };
+}
