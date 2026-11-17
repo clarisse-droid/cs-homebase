@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { loadPortfolio } from "@/lib/server/portfolio";
 import { Badge, Card, Empty, Stat, fmtDateTime } from "@/components/ui";
 import { SheetUnitsTable } from "@/components/sheet-units";
-import { rentStatus } from "@/lib/sheets/rent";
+import { likelyClients, rentStatus } from "@/lib/sheets/rent";
+import { linkSheetClient } from "@/app/actions";
 
 export const metadata = { title: "Client units" };
 
@@ -21,6 +22,9 @@ export default async function ClientUnitsPage({ searchParams }: { searchParams: 
     .sort((a, b) => a.client.name.localeCompare(b.client.name));
   const unmatched = p.sheetMatch.unmatched.filter((r) => !q || `${r.sheetClient} ${r.units.map((u) => u.unit).join(" ")}`.toLowerCase().includes(q));
   const all = p.sheet.units;
+  const canWrite = p.user.role !== "viewer";
+  const sortedClients = [...p.snapshot.clients].sort((a, b) => a.name.localeCompare(b.name));
+  const nameOf = (id: string | null) => (id ? byId.get(id)?.name ?? "Unknown client" : "");
   const unpaidLate = all.filter((u) => rentStatus(u, p.now).tone === "red").length;
   const leasesSoon = all.filter((u) => u.leaseEnd && Date.parse(u.leaseEnd) - p.now.getTime() <= 90 * 86_400_000 && Date.parse(u.leaseEnd) >= p.now.getTime()).length;
 
@@ -40,10 +44,55 @@ export default async function ClientUnitsPage({ searchParams }: { searchParams: 
       <form className="flex gap-2"><input name="q" defaultValue={searchParams.q} placeholder="Search client or unit…" className="input max-w-sm" /><button className="btn">Search</button></form>
 
       {unmatched.length > 0 && (
-        <Card title={`Not matched to a Monday client (${unmatched.length})`} action={<span className="text-xs faint">The sheet&apos;s name doesn&apos;t exactly match any Monday client name or company</span>}>
+        <Card title={`Not matched to a Monday client (${unmatched.length})`} action={<span className="text-xs faint">Link each name once and it&apos;s remembered. Suggestions are only suggestions: nothing links until you pick.</span>}>
           <ul className="divide-y divide-stone-100 dark:divide-zinc-800">
-            {unmatched.map((r) => (
-              <li key={r.sheetClient} className="px-5 py-2.5 text-sm"><span className="font-medium">{r.sheetClient}</span> <span className="text-xs muted">· {r.units.length} unit(s): {r.units.map((u) => u.unit).join(", ")}</span></li>
+            {unmatched.map((r) => {
+              const likely = likelyClients(r.sheetClient, p.snapshot.clients);
+              return (
+                <li key={r.sheetClient} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
+                  <div className="min-w-[16rem] flex-1"><span className="font-medium">{r.sheetClient}</span><div className="text-xs muted">{r.units.length} unit(s): {r.units.map((u) => u.unit).join(", ")}</div></div>
+                  {canWrite && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <form action={linkSheetClient} className="flex items-center gap-2">
+                        <input type="hidden" name="sheetClient" value={r.sheetClient} />
+                        <input type="hidden" name="action" value="link" />
+                        <select name="clientId" required defaultValue="" className="input w-64">
+                          <option value="" disabled>Link to client…</option>
+                          {likely.length > 0 && <optgroup label="Likely matches">{likely.map((c) => <option key={c.mondayItemId} value={c.mondayItemId}>{c.name}{c.masterStatus ? ` · ${c.masterStatus}` : ""}</option>)}</optgroup>}
+                          <optgroup label="All clients">{sortedClients.map((c) => <option key={c.mondayItemId} value={c.mondayItemId}>{c.name}{c.masterStatus ? ` · ${c.masterStatus}` : ""}</option>)}</optgroup>
+                        </select>
+                        <button className="btn-primary text-xs">Link</button>
+                      </form>
+                      <form action={linkSheetClient}>
+                        <input type="hidden" name="sheetClient" value={r.sheetClient} />
+                        <input type="hidden" name="action" value="ignore" />
+                        <button className="btn text-xs" title="e.g. Baetelle or Turnkey Stays: units that aren't a client's">Not a client</button>
+                      </form>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
+
+      {p.sheetMatch.manual.length > 0 && (
+        <Card title={`Linked by hand (${p.sheetMatch.manual.length})`}>
+          <ul className="divide-y divide-stone-100 dark:divide-zinc-800">
+            {p.sheetMatch.manual.map((m) => (
+              <li key={m.sheetClient} className="flex flex-wrap items-center gap-3 px-5 py-2.5 text-sm">
+                <div className="flex-1"><span className="font-medium">{m.sheetClient}</span> <span className="text-xs muted">· {m.units} unit(s) → </span>
+                  {m.status === "linked" ? <Link href={`/clients/${m.clientId}`} className="link text-xs">{nameOf(m.clientId)}</Link> : <Badge>Not a client</Badge>}
+                </div>
+                {canWrite && (
+                  <form action={linkSheetClient}>
+                    <input type="hidden" name="sheetClient" value={m.sheetClient} />
+                    <input type="hidden" name="action" value="undo" />
+                    <button className="btn text-xs">Undo</button>
+                  </form>
+                )}
+              </li>
             ))}
           </ul>
         </Card>
