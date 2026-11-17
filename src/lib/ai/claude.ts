@@ -16,9 +16,9 @@ Rules you must follow:
 4. Keep confirmed facts separate from pending items and from your own recommendations. Recommendations are suggestions for a human, not facts.
 5. Be neutral about delays: describe what is outstanding and who owns it without blaming any team.`;
 
-interface ClaudeResponse { content: { type: string; text?: string }[]; usage?: { input_tokens: number; output_tokens: number } }
+interface ClaudeResponse { content: { type: string; text?: string; name?: string; input?: unknown }[]; usage?: { input_tokens: number; output_tokens: number } }
 
-export async function callClaude(system: string, user: string, maxTokens = 1200, fetchImpl: typeof fetch = fetch): Promise<string> {
+async function postClaude(body: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<ClaudeResponse> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY not set");
   let lastErr: unknown;
@@ -26,7 +26,7 @@ export async function callClaude(system: string, user: string, maxTokens = 1200,
     const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: MODEL(), max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }),
+      body: JSON.stringify({ model: MODEL(), ...body }),
     });
     if (res.status === 429 || res.status >= 500) {
       lastErr = new Error(`Claude API HTTP ${res.status}`);
@@ -34,11 +34,46 @@ export async function callClaude(system: string, user: string, maxTokens = 1200,
       continue;
     }
     if (!res.ok) throw new Error(`Claude API HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const body = (await res.json()) as ClaudeResponse;
-    return body.content.filter((c) => c.type === "text").map((c) => c.text).join("");
+    return (await res.json()) as ClaudeResponse;
   }
   throw lastErr;
 }
+
+export async function callClaude(system: string, user: string, maxTokens = 1200, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const body = await postClaude({ max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }, fetchImpl);
+  return body.content.filter((c) => c.type === "text").map((c) => c.text).join("");
+}
+
+/** Structured output: Claude must answer by "calling" a tool whose input schema is enforced, so the result is always valid JSON. */
+export async function callClaudeStructured<T>(system: string, user: string, schema: Record<string, unknown>, maxTokens = 2000, fetchImpl: typeof fetch = fetch): Promise<T> {
+  const body = await postClaude({
+    max_tokens: maxTokens, system,
+    messages: [{ role: "user", content: user }],
+    tools: [{ name: "respond", description: "Return the answer in this exact structure.", input_schema: schema }],
+    tool_choice: { type: "tool", name: "respond" },
+  }, fetchImpl);
+  const use = body.content.find((c) => c.type === "tool_use" && c.name === "respond");
+  if (use?.input) return use.input as T;
+  // Fallback: some responses may still come back as text
+  return parseJson<T>(body.content.filter((c) => c.type === "text").map((c) => c.text).join(""));
+}
+
+const strList = { type: "array", items: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } };
+const SUMMARY_SCHEMA = {
+  type: "object",
+  properties: {
+    headline: { type: "string" },
+    confirmed: strList,
+    pending: strList,
+    recommendations: { type: "array", items: { type: "object", properties: { text: { type: "string" }, priority: { type: "string", enum: ["high", "medium", "low"] } }, required: ["text", "priority"] } },
+  },
+  required: ["headline", "confirmed", "pending", "recommendations"],
+};
+const DRAFT_SCHEMA = {
+  type: "object",
+  properties: { subject: { type: "string" }, body: { type: "string" }, confirmed: { type: "array", items: { type: "string" } }, pending: { type: "array", items: { type: "string" } } },
+  required: ["subject", "body", "confirmed", "pending"],
+};
 
 // ------------------------------------------------------------ citation validation
 
@@ -76,18 +111,18 @@ export function summaryInputHash(facts: Fact[]) {
 export async function summarizeClient(v: ClientView, cs: CsState, changes: ChangeEvent[], now = new Date()): Promise<{ summary: ClientSummary; facts: Fact[] }> {
   const facts = clientFacts(v, cs, changes, now);
   if (!aiAvailable()) return { summary: ruleSummary(v, facts), facts };
-  const raw = await callClaude(
+  const p = await callClaudeStructured<{ headline: string; confirmed: { text: string }[]; pending: { text: string }[]; recommendations: { text: string; priority: "high" | "medium" | "low" }[] }>(
     GUARDRAILS,
     `<operational_data>\n${factsBlock(facts)}\n</operational_data>
 
-Write a progress summary for the CS manager. Respond with JSON only:
-{"headline": "one or two sentences, with citations",
- "confirmed": [{"text": "confirmed fact with [ref]"}],
- "pending": [{"text": "outstanding / unverified item with [ref]"}],
- "recommendations": [{"text": "specific next CS action, with [ref] for the facts that justify it", "priority": "high|medium|low"}]}
+Write a progress summary for the CS manager using the respond tool.
+- headline: one or two sentences, with citations
+- confirmed: confirmed facts, each with [ref]
+- pending: outstanding or unverified items, each with [ref]
+- recommendations: specific next CS actions, each with [ref] for the facts that justify it, and a priority
 Max 5 items per list.`,
+    SUMMARY_SCHEMA,
   );
-  const p = parseJson<{ headline: string; confirmed: { text: string }[]; pending: { text: string }[]; recommendations: { text: string; priority: "high" | "medium" | "low" }[] }>(raw);
   let dropped = 0;
   const keep = <T extends { text: string }>(arr: T[] = []) =>
     arr.map((x) => ({ ...x, ...validateCitations(sanitize(x.text, 600), facts) })).filter((x) => {
@@ -183,14 +218,15 @@ export async function draftClientUpdate(v: ClientView, cs: CsState, changes: Cha
       confirmed, pending, facts, invalidRefs: [], generatedBy: "rules",
     };
   }
-  const raw = await callClaude(
+  const p = await callClaudeStructured<{ subject: string; body: string; confirmed: string[]; pending: string[] }>(
     GUARDRAILS + "\n6. This is a client-facing draft. Do not mention internal team member names, internal tools, alerts, risk levels or blame. Do not promise dates that are not in the data.",
-    `<operational_data>\n${factsBlock(facts)}\n</operational_data>\n\nDraft a ${sanitize(tone, 40) || "warm, professional"} progress update email to the client (first name: ${sanitize(first, 30)}).
-Respond with JSON only: {"subject": "...", "body": "email body without citations", "confirmed": ["each confirmed point with [ref]"], "pending": ["each pending point with [ref]"]}.
+    `<operational_data>\n${factsBlock(facts)}\n</operational_data>\n\nDraft a ${sanitize(tone, 40) || "warm, professional"} progress update email to the client (first name: ${sanitize(first, 30)}) using the respond tool.
+- subject, and body (email body without citations)
+- confirmed: each confirmed point used, with [ref]
+- pending: each pending point used, with [ref]
 Every sentence in the body must be supported by a fact in "confirmed" or "pending".`,
-    1500,
+    DRAFT_SCHEMA,
   );
-  const p = parseJson<{ subject: string; body: string; confirmed: string[]; pending: string[] }>(raw);
   const check = [...(p.confirmed ?? []), ...(p.pending ?? [])].map((x) => validateCitations(x, facts));
   return {
     subject: sanitize(p.subject, 160),
