@@ -154,3 +154,20 @@ export async function markSeen() {
   await repo.setLastSeen(user.id, new Date().toISOString());
   revalidatePath("/");
 }
+
+/** CS links a rent-sheet client name to a Monday client, marks it "not a client", or undoes that. */
+export async function linkSheetClient(fd: FormData) {
+  const { repo, user } = await requireUser([...CS]);
+  const v = z.object({
+    sheetClient: z.string().min(1).max(300),
+    action: z.enum(["link", "ignore", "undo"]),
+    clientId: z.string().max(64).nullable(),
+  }).parse({ sheetClient: fd.get("sheetClient"), action: fd.get("action"), clientId: opt(fd.get("clientId")) });
+  if (v.action === "link") {
+    if (!v.clientId) throw new Error("Pick a client first");
+    const exists = (await repo.getSnapshot()).clients.some((c) => c.mondayItemId === v.clientId);
+    if (!exists) throw new Error("Unknown client");
+  }
+  await repo.saveSheetLink({ sheetClient: v.sheetClient, clientId: v.action === "link" ? v.clientId : null, status: v.action === "link" ? "linked" : v.action === "ignore" ? "ignored" : "removed" }, user);
+  revalidatePath("/", "layout");
+}
