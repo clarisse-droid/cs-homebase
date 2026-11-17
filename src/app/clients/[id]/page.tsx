@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { loadPortfolio } from "@/lib/server/portfolio";
 import { Badge, Card, Empty, SourceTag, ago, fmtDate, fmtDateTime, riskTone, stageStatusLabel, stageTone, unitLabel } from "@/components/ui";
 import { UnitPanel } from "@/components/unit-panel";
+import { SheetUnitsTable } from "@/components/sheet-units";
 import { DraftUpdate, NoteResolve, SummaryPanel, TaskCheck } from "@/components/client-bits";
 import { addCommunication, addNote, createTask, recordMilestone, setHealth } from "@/app/actions";
 
@@ -22,6 +23,7 @@ export default async function ClientPage({ params }: { params: { id: string } })
   const initial = saved ? { ...JSON.parse(saved.summary), generatedAt: saved.generatedAt } : null;
   const today = p.now.toISOString().slice(0, 10);
   const agg = (s: string) => v.units.filter((u) => u.status === s).length;
+  const sheetUnits = p.sheetMatch?.byClient.get(id) ?? [];
 
   return (
     <div className="space-y-6">
@@ -61,6 +63,12 @@ export default async function ClientPage({ params }: { params: { id: string } })
           <SummaryPanel clientId={id} initial={initial} />
         </Card>
       </div>
+
+      <Card title={`Units held (${sheetUnits.length})`} action={<span className="text-xs faint">From the rent sheet{p.sheet ? ` · updated ${fmtDateTime(p.sheet.syncedAt)}` : ""}</span>}>
+        {!p.sheet ? <Empty>The rent sheet isn&apos;t connected yet.</Empty>
+          : sheetUnits.length ? <SheetUnitsTable units={sheetUnits} now={p.now} />
+          : <Empty>No units for this client in the rent sheet. If they do have units, check the <Link href="/client-units" className="link">Client units</Link> page for names that didn&apos;t match.</Empty>}
+      </Card>
 
       {v.risks.length > 0 && (
         <Card title={`Alerts (${v.risks.length})`}>
