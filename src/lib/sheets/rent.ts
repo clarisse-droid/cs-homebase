@@ -58,7 +58,7 @@ export function payByDay(heading: string): number | null {
 
 /** "Unit 1314 (1 Bed)" in building "Magnolia Scofield" → "Magnolia Scofield Unit 1314" */
 function displayUnit(unit: string, building: string | null): string {
-  const u = clean(unit).replace(/\s*\((?:\d+\s*bed|[^)]*\d+\/\d+[^)]*)\)\s*/gi, " ").replace(/\s*-\s*\d\s*bed\s*$/i, "").replace(/\s*-\s*1 parking.*$/i, "").replace(/\s*-\s*partner\s*$/i, "").trim();
+  const u = clean(unit.replace(/\s*-?\s*[^\s@]*@[^\s]*/g, "")) // drop internal email addresses written into unit names.replace(/\s*\((?:\d+\s*bed|[^)]*\d+\/\d+[^)]*)\)\s*/gi, " ").replace(/\s*-\s*\d\s*bed\s*$/i, "").replace(/\s*-\s*1 parking.*$/i, "").replace(/\s*-\s*partner\s*$/i, "").trim();
   const hasName = /[a-z]{3,}/i.test(u.replace(/\bunit\b/gi, ""));
   return !hasName && building ? `${building} ${u}` : u;
 }
@@ -154,7 +154,9 @@ export function mergeUnits(lease: SheetUnit[], rent: SheetUnit[]): SheetUnit[] {
   const out = new Map<string, SheetUnit>();
   for (const u of lease) if (!out.has(ck(u))) out.set(ck(u), { ...u });
   for (const r of rent) {
-    const hit = out.get(ck(r)) ?? [...out.values()].find((u) => u.key === r.key && clientKey(u.sheetClient) === clientKey(r.sheetClient));
+    // Same unit + same client; otherwise the only lease row for that unit (client names are often spelled differently across tabs).
+    const sameKey = [...out.values()].filter((u) => u.key === r.key && !u.rent);
+    const hit = out.get(ck(r)) ?? (sameKey.length === 1 ? sameKey[0] : undefined);
     if (hit) {
       hit.payByDay = r.payByDay ?? hit.payByDay;
       hit.rent = r.rent;
