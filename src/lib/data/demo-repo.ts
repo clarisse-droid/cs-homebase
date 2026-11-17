@@ -1,7 +1,8 @@
 import { DEFAULT_RULES, type RuleConfig } from "../rules/config";
 import type { ChangeEvent, CsState, SourceSnapshot, SyncRun } from "../types";
 import type { AiSummaryRecord, AppUser, AuditEntry, Repo } from "./repo";
-import { syntheticChanges, syntheticSnapshot } from "./synthetic";
+import { syntheticChanges, syntheticSheet, syntheticSnapshot } from "./synthetic";
+import type { SheetData } from "../sheets/rent";
 import { buildPortfolio } from "../rules/engine";
 import { newRuleSuggestions } from "../sync/suggest";
 
@@ -14,6 +15,7 @@ interface DemoState {
   audit: AuditEntry[];
   summaries: AiSummaryRecord[];
   lastSeen: Record<string, string>;
+  sheet: SheetData;
 }
 
 const g = globalThis as unknown as { __csDemo?: DemoState };
@@ -30,6 +32,7 @@ function state(): DemoState {
       audit: [],
       summaries: [],
       lastSeen: { demo: new Date(now.getTime() - 86_400_000).toISOString() },
+      sheet: syntheticSheet(now),
     };
     // Simulate what the first sync's risk monitor would queue for approval.
     const st = g.__csDemo;
@@ -55,6 +58,7 @@ export class DemoRepo implements Repo {
   async getAudit(limit = 100) { return state().audit.slice(0, limit); }
   async getSummary(id: string) { return state().summaries.find((s) => s.clientId === id) ?? null; }
   async getLastSeen(u: string) { return state().lastSeen[u] ?? null; }
+  async getSheetUnits() { return state().sheet; }
 
   async saveTask(t: CsState["tasks"][number], a: AppUser) { upsert(state().cs.tasks, t, (x) => x.id); await this.audit(a, "save", "cs_task", t.id); }
   async saveNote(n: CsState["notes"][number], a: AppUser) { upsert(state().cs.notes, n, (x) => x.id); await this.audit(a, "save", "cs_note", n.id); }
@@ -77,4 +81,5 @@ export class DemoRepo implements Repo {
     return fresh.length;
   }
   async saveSyncRun(r: SyncRun) { upsert(state().runs, r, (x) => x.id); }
+  async replaceSheetUnits(d: SheetData) { state().sheet = d; }
 }
