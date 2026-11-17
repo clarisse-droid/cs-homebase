@@ -50,7 +50,7 @@ export async function callClaudeStructured<T>(system: string, user: string, sche
     max_tokens: maxTokens, system,
     messages: [{ role: "user", content: user }],
     tools: [{ name: "respond", description: "Return the answer in this exact structure.", input_schema: schema }],
-    tool_choice: { type: "tool", name: "respond" },
+    tool_choice: { type: "auto" }, // some models reject forced tool choice; the prompt requires the respond tool
   }, fetchImpl);
   const use = body.content.find((c) => c.type === "tool_use" && c.name === "respond");
   if (use?.input) return use.input as T;
