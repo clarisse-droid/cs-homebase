@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { mergeRules, type RuleConfig } from "../rules/config";
 import type { ChangeEvent, CsState, SourceSnapshot, SyncRun } from "../types";
 import type { AiSummaryRecord, AppUser, AuditEntry, Repo } from "./repo";
+import type { SheetData } from "../sheets/rent";
 
 const PAGE = 1000;
 async function all<T>(q: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -84,6 +85,11 @@ export class SupabaseRepo implements Repo {
     return data?.last_seen_at ?? null;
   }
 
+  async getSheetUnits(): Promise<SheetData | null> {
+    const { data } = await this.db.from("source_sheet_units").select("data").eq("id", 1).maybeSingle();
+    return (data?.data as SheetData) ?? null;
+  }
+
   async saveTask(t: CsState["tasks"][number], a: AppUser) {
     ok(await this.db.from("cs_tasks").upsert({ id: t.id, client_id: t.clientId, unit_id: t.unitId, title: t.title, notes: t.notes, priority: t.priority, due_date: t.dueDate, status: t.status, is_escalation: t.isEscalation, origin: t.origin, created_at: t.createdAt, completed_at: t.completedAt, created_by: a.id }));
   }
@@ -148,6 +154,9 @@ export class SupabaseRepo implements Repo {
     ).select("id");
     if (error) throw new Error(error.message);
     return data?.length ?? 0;
+  }
+  async replaceSheetUnits(d: SheetData) {
+    ok(await this.w.from("source_sheet_units").upsert({ id: 1, data: d, synced_at: d.syncedAt }));
   }
   async saveSyncRun(r: SyncRun) {
     ok(await this.w.from("sync_runs").upsert({ id: r.id, kind: r.kind, status: r.status, started_at: r.startedAt, finished_at: r.finishedAt, items_read: r.itemsRead, changes: r.changes, errors: r.errors }));
