@@ -1,4 +1,5 @@
 import type { RuleConfig } from "../rules/config";
+import type { SheetData } from "../sheets/rent";
 import type {
   AiSuggestion, BoardMapping, ChangeEvent, CsCommunication, CsHealthAssessment, CsMilestoneRecord,
   CsNote, CsState, CsTask, SourceSnapshot, SyncRun,
@@ -46,6 +47,8 @@ export interface Repo {
   getAudit(limit?: number): Promise<AuditEntry[]>;
   getSummary(clientId: string): Promise<AiSummaryRecord | null>;
   getLastSeen(userId: string): Promise<string | null>;
+  /** Client units from the rent Google Sheet (read-only copy). */
+  getSheetUnits(): Promise<SheetData | null>;
 
   // ---- CS writes (never touch source data)
   saveTask(t: CsTask, actor: AppUser): Promise<void>;
@@ -64,4 +67,5 @@ export interface Repo {
   replaceSource(s: SourceSnapshot, opts?: { reconcile: boolean }): Promise<void>;
   appendChanges(e: ChangeEvent[]): Promise<number>;
   saveSyncRun(r: SyncRun): Promise<void>;
+  replaceSheetUnits(d: SheetData): Promise<void>;
 }
