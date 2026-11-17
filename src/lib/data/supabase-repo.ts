@@ -101,7 +101,7 @@ export class SupabaseRepo implements Repo {
     await this.audit(a, "save", "cs_health", h.clientId);
   }
   async saveMapping(m: CsState["mappings"][number], a: AppUser | "system") {
-    ok(await this.db.from("board_mappings").upsert({ id: m.id, board_id: m.boardId, client_id: m.clientId, unit_ids: m.unitIds, status: m.status, confidence: m.confidence, reason: m.reason, updated_by: a === "system" ? null : a.id, updated_at: new Date().toISOString() }, { onConflict: "board_id,client_id" }));
+    ok(await this.db.from("board_mappings").upsert({ id: m.id, board_id: m.boardId, client_id: m.clientId, unit_ids: m.unitIds, status: m.status, confidence: m.confidence, reason: m.reason, updated_by: a === "system" || a.id === "system" ? null : a.id, updated_at: new Date().toISOString() }, { onConflict: "board_id,client_id" }));
   }
   async saveSuggestions(s: CsState["suggestions"]) {
     if (!s.length) return;
