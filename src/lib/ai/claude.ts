@@ -4,7 +4,7 @@ import type { ClientView } from "../rules/engine";
 import type { ChangeEvent, CsState } from "../types";
 import { clientFacts, factsBlock, sanitize, type Fact } from "./context";
 
-const MODEL = () => process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+const MODEL = () => process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5";
 export const aiAvailable = () => !!process.env.ANTHROPIC_API_KEY;
 
 const GUARDRAILS = `You are a Customer Success analyst for a short-term rental arbitrage company.
@@ -26,7 +26,7 @@ export async function callClaude(system: string, user: string, maxTokens = 1200,
     const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: MODEL(), max_tokens: maxTokens, temperature: 0.2, system, messages: [{ role: "user", content: user }] }),
+      body: JSON.stringify({ model: MODEL(), max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }),
     });
     if (res.status === 429 || res.status >= 500) {
       lastErr = new Error(`Claude API HTTP ${res.status}`);
