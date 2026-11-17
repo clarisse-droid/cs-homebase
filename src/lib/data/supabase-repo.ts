@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { mergeRules, type RuleConfig } from "../rules/config";
 import type { ChangeEvent, CsState, SourceSnapshot, SyncRun } from "../types";
 import type { AiSummaryRecord, AppUser, AuditEntry, Repo } from "./repo";
-import type { SheetData } from "../sheets/rent";
+import type { SheetClientLink, SheetData } from "../sheets/rent";
 
 const PAGE = 1000;
 async function all<T>(q: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -88,6 +88,15 @@ export class SupabaseRepo implements Repo {
   async getSheetUnits(): Promise<SheetData | null> {
     const { data } = await this.db.from("source_sheet_units").select("data").eq("id", 1).maybeSingle();
     return (data?.data as SheetData) ?? null;
+  }
+
+  async getSheetLinks(): Promise<SheetClientLink[]> {
+    const { data, error } = await this.db.from("sheet_client_links").select("id, client_id, status");
+    if (error) return [];
+    return (data ?? []).map((r) => ({ sheetClient: r.id, clientId: r.client_id, status: r.status }));
+  }
+  async saveSheetLink(l: SheetClientLink, a: AppUser) {
+    ok(await this.db.from("sheet_client_links").upsert({ id: l.sheetClient, client_id: l.clientId, status: l.status, updated_by: a.id, updated_at: new Date().toISOString() }));
   }
 
   async saveTask(t: CsState["tasks"][number], a: AppUser) {
