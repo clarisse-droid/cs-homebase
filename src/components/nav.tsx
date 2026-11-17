@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const ITEMS = [
-  ["/", "Dashboard"], ["/clients", "Clients"], ["/units", "Unit Setup"], ["/tasks", "CS Tasks"],
+  ["/", "Dashboard"], ["/clients", "Clients"], ["/units", "Unit Setup"], ["/client-units", "Client Units"], ["/tasks", "CS Tasks"],
   ["/communications", "Communications"], ["/ask", "Ask Claude"], ["/settings", "Settings"],
 ] as const;
 
