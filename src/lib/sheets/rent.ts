@@ -33,6 +33,15 @@ export interface SheetData {
 export interface ClientUnitMatch {
   byClient: Map<string, SheetUnit[]>; // mondayItemId → units
   unmatched: { sheetClient: string; units: SheetUnit[] }[];
+  /** Sheet names CS linked or marked "not a client" by hand. */
+  manual: { sheetClient: string; status: "linked" | "ignored"; clientId: string | null; units: number }[];
+}
+
+/** A CS decision about one sheet client name (exact text). */
+export interface SheetClientLink {
+  sheetClient: string;
+  clientId: string | null;
+  status: "linked" | "ignored" | "removed";
 }
 
 // ---------------------------------------------------------------- helpers
@@ -180,7 +189,10 @@ const clientKey = (s: string) => splitSheetClient(s).person;
  * A sheet client links to a Monday client when the person name equals the Monday client name,
  * or the business name equals the Monday company name.
  */
-export function matchClients(units: SheetUnit[], clients: SourceClient[]): ClientUnitMatch {
+export function matchClients(units: SheetUnit[], clients: SourceClient[], links: SheetClientLink[] = []): ClientUnitMatch {
+  const manualBy = new Map(links.filter((l) => l.status !== "removed").map((l) => [l.sheetClient, l]));
+  const known = new Set(clients.map((c) => c.mondayItemId));
+  const manualCount = new Map<string, number>();
   const byPerson = new Map<string, SourceClient[]>();
   const byBiz = new Map<string, SourceClient[]>();
   const add = (m: Map<string, SourceClient[]>, k: string, c: SourceClient) => { if (k) m.set(k, [...(m.get(k) ?? []), c]); };
@@ -194,6 +206,12 @@ export function matchClients(units: SheetUnit[], clients: SourceClient[]): Clien
   const byClient = new Map<string, SheetUnit[]>();
   const unmatched = new Map<string, SheetUnit[]>();
   for (const u of units) {
+    const link = manualBy.get(u.sheetClient);
+    if (link && (link.status === "ignored" || (link.clientId && known.has(link.clientId)))) {
+      manualCount.set(u.sheetClient, (manualCount.get(u.sheetClient) ?? 0) + 1);
+      if (link.status === "linked") byClient.set(link.clientId!, [...(byClient.get(link.clientId!) ?? []), u]);
+      continue;
+    }
     const { person, business } = splitSheetClient(u.sheetClient);
     let hits = byPerson.get(person) ?? (business ? byBiz.get(business) : undefined) ?? [];
     // Prefer the non-churned record when Monday has duplicates of the same person
@@ -203,7 +221,11 @@ export function matchClients(units: SheetUnit[], clients: SourceClient[]): Clien
     for (const c of hits) byClient.set(c.mondayItemId, [...(byClient.get(c.mondayItemId) ?? []), u]);
   }
   for (const list of byClient.values()) list.sort((a, b) => a.unit.localeCompare(b.unit, undefined, { numeric: true }));
-  return { byClient, unmatched: [...unmatched.entries()].map(([sheetClient, units]) => ({ sheetClient, units })).sort((a, b) => a.sheetClient.localeCompare(b.sheetClient)) };
+  const manual = [...manualCount.entries()].map(([sheetClient, n]) => {
+    const l = manualBy.get(sheetClient)!;
+    return { sheetClient, status: l.status as "linked" | "ignored", clientId: l.clientId, units: n };
+  }).sort((a, b) => a.sheetClient.localeCompare(b.sheetClient));
+  return { byClient, unmatched: [...unmatched.entries()].map(([sheetClient, units]) => ({ sheetClient, units })).sort((a, b) => a.sheetClient.localeCompare(b.sheetClient)), manual };
 }
 
 /** Rent status for display, judged against the building's pay-by day. */
@@ -216,3 +238,20 @@ export function rentStatus(u: SheetUnit, now: Date): { label: string; tone: "gre
   return { label: u.payByDay ? `Not paid yet · due the ${u.payByDay}${ord(u.payByDay)}` : "Not paid yet", tone: "amber" };
 }
 const ord = (n: number) => (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
+
+/** Up to 3 Monday clients whose name/company shares a word with the sheet name — shown first in the picker (never auto-linked). */
+export function likelyClients(sheetClient: string, clients: SourceClient[]): SourceClient[] {
+  const words = (x: string) => new Set(x.toLowerCase().normalize("NFKD").replace(/\[demo\]/g, "").split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !["llc", "inc", "the", "and", "management", "properties", "stays", "group", "holdings", "corp"].includes(w)));
+  const want = words(sheetClient);
+  return clients
+    .map((c) => {
+      const have = words(`${c.name} ${c.companyName ?? ""}`);
+      let score = 0;
+      for (const w of want) if (have.has(w)) score++;
+      return { c, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.c.name.localeCompare(b.c.name))
+    .slice(0, 3)
+    .map((x) => x.c);
+}
