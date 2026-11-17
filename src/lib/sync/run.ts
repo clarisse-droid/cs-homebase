@@ -8,6 +8,8 @@ import { newRuleSuggestions } from "./suggest";
 export { riskToSuggestion } from "./suggest";
 import { diffSnapshots } from "./diff";
 import { suggestMappings } from "./mapping";
+import { sheetsConfigured } from "../sheets/google";
+import { fetchSheetUnits } from "../sheets/fetch";
 
 /**
  * Automation A (sync) + B (risk monitoring) + rule-based task suggestions.
@@ -58,7 +60,20 @@ export async function runSync(repo: Repo, kind: "incremental" | "full", log: (m:
     const views = buildPortfolio(snapshot, { ...cs, mappings: [...cs.mappings, ...newMaps] }, changes, rules, new Date());
     await repo.saveSuggestions(newRuleSuggestions(views, cs), "system");
 
-    run.status = errors.length ? "partial" : "success";
+    // Rent sheet (Google Sheets, read-only). Optional; its failure never blocks the Monday sync.
+    if (sheetsConfigured()) {
+      try {
+        const sheet = await fetchSheetUnits(process.env.RENT_SHEET_ID!);
+        if (sheet.units.length) await repo.replaceSheetUnits(sheet);
+        else sheet.errors.push("Rent sheet returned no units; kept the previous copy.");
+        log(`rent sheet: ${sheet.units.length} units`);
+        run.errors.push(...sheet.errors.map((e) => `Rent sheet · ${e}`));
+      } catch (e) {
+        run.errors.push(`Rent sheet: ${(e as Error).message}`);
+      }
+    }
+
+    run.status = run.errors.length ? "partial" : "success";
   } catch (e) {
     run.status = "failed";
     run.errors.push((e as Error).message);
