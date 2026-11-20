@@ -1,6 +1,6 @@
 import "server-only";
 import { readRanges } from "./google";
-import { LEASE_TAB, RENT_TAB, colLetter, findMonthColumn, mergeUnits, parseLeaseTab, parseRentTab, type SheetData } from "./rent";
+import { LEASE_TAB, RENT_TAB, allMonthColumns, colLetter, findMonthColumn, mergeUnits, parseLeaseTab, parseRentTab, type SheetData } from "./rent";
 
 const q = (tab: string) => `'${tab.replace(/'/g, "''")}'`;
 
@@ -28,7 +28,10 @@ export async function fetchSheetUnits(sheetId: string, now = new Date()): Promis
       `${q(RENT_TAB)}!E1:E3000`,
       `${q(RENT_TAB)}!${colLetter(m.col)}1:${colLetter(m.col + 2)}3000`,
     ]);
-    rent = parseRentTab(units, clients, month, m.month);
+    // Amount column of every month (only the month's own column: never the note/bank columns beside it).
+    const months = allMonthColumns(header[0] ?? []);
+    const hist = months.length ? await readRanges(sheetId, months.map((x) => `${q(RENT_TAB)}!${colLetter(x.col)}1:${colLetter(x.col)}3000`)) : [];
+    rent = parseRentTab(units, clients, month, m.month, months.map((x, i) => ({ month: x.month, values: hist[i] ?? [] })));
   } catch (e) {
     errors.push(`Monthly rent tab: ${(e as Error).message}`);
   }
