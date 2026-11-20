@@ -21,6 +21,8 @@ export interface SheetUnit {
   renewalContact: string | null;
   payByDay: number | null;
   rent: { month: string; amount: string | null; paid: boolean; note: string | null } | null;
+  /** First month (YYYY-MM) rent was charged for this unit; null if unknown. "before:YYYY-MM" when it predates the sheet. */
+  firstRentMonth?: string | null;
 }
 
 export interface SheetData {
@@ -92,6 +94,13 @@ export function monthOf(header: string): string | null {
   return i < 0 ? null : `${m[2]}-${String(i + 1).padStart(2, "0")}`;
 }
 
+/** Every "Month YYYY" header column, oldest first. */
+export function allMonthColumns(headerRow: string[]): { col: number; month: string }[] {
+  const out: { col: number; month: string }[] = [];
+  headerRow.forEach((h, col) => { const month = monthOf(h ?? ""); if (month) out.push({ col, month }); });
+  return out.sort((a, b) => a.month.localeCompare(b.month));
+}
+
 /** Column index of the current month's amount; falls back to the latest month present. */
 export function findMonthColumn(headerRow: string[], now: Date): { col: number; month: string } | null {
   const want = now.toISOString().slice(0, 7);
@@ -128,7 +137,16 @@ export function parseLeaseTab(rows: string[][]): SheetUnit[] {
  * ClientUnitRents: units = column C, client = column E, month group = [amount, paid tick, note].
  * Rows without an amount and without a tick this month are old/inactive rows and are skipped.
  */
-export function parseRentTab(unitCol: string[][], clientCol: string[][], monthCols: string[][], month: string): SheetUnit[] {
+export function parseRentTab(
+  unitCol: string[][], clientCol: string[][], monthCols: string[][], month: string,
+  history: { month: string; values: string[][] }[] = [],
+): SheetUnit[] {
+  const firstMonth = (i: number): string | null => {
+    if (!history.length) return null;
+    const hit = history.find((h) => /\d/.test(clean(h.values[i]?.[0])));
+    if (!hit) return null;
+    return hit.month === history[0].month ? `before:${hit.month}` : hit.month;
+  };
   const out: SheetUnit[] = [];
   let building: string | null = null;
   let due: number | null = null;
@@ -152,7 +170,7 @@ export function parseRentTab(unitCol: string[][], clientCol: string[][], monthCo
     if (!hasAmount && !paid && !statusWord) continue;
     const unit = displayUnit(unitRaw, building);
     const noteText = [statusWord, /^\d{3,}$/.test(note) ? "" : note].filter(Boolean).join(" · ") || null;
-    out.push({ key: unitKey(unit), unit, building, sheetClient: client, leaseEnd: null, renewalContact: null, payByDay: due, rent: { month, amount: hasAmount ? amount : null, paid, note: noteText } });
+    out.push({ key: unitKey(unit), unit, building, sheetClient: client, leaseEnd: null, renewalContact: null, payByDay: due, rent: { month, amount: hasAmount ? amount : null, paid, note: noteText }, firstRentMonth: firstMonth(i) });
   }
   return out;
 }
@@ -169,6 +187,7 @@ export function mergeUnits(lease: SheetUnit[], rent: SheetUnit[]): SheetUnit[] {
     if (hit) {
       hit.payByDay = r.payByDay ?? hit.payByDay;
       hit.rent = r.rent;
+      hit.firstRentMonth = r.firstRentMonth ?? hit.firstRentMonth ?? null;
     } else out.set(ck(r), { ...r });
   }
   return [...out.values()];
