@@ -3,8 +3,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
-const ITEMS = [
-  ["/", "Dashboard"], ["/clients", "Clients"], ["/units", "Unit Setup"], ["/client-units", "Client Units"], ["/tasks", "CS Tasks"],
+const MAIN = [["/", "Home"], ["/clients", "Clients"], ["/setup", "Units in setup"]] as const;
+const MORE = [
+  ["/dashboard", "Dashboard & alerts"], ["/units", "Setup boards (detail)"], ["/client-units", "Rent & leases"], ["/tasks", "CS Tasks"],
   ["/communications", "Communications"], ["/ask", "Ask Claude"], ["/settings", "Settings"],
 ] as const;
 
@@ -12,18 +13,24 @@ export function Nav({ alertCount, suggestionCount }: { alertCount: number; sugge
   const path = usePathname();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [path]);
+  const link = ([href, label]: readonly [string, string], small = false) => {
+    const active = href === "/" ? path === "/" : path === href || path.startsWith(href + "/");
+    const count = href === "/dashboard" ? alertCount : href === "/tasks" ? suggestionCount : 0;
+    return (
+      <Link key={href} href={href} className={`flex items-center justify-between rounded-lg px-3 ${small ? "py-1.5 text-[13px]" : "py-2 text-sm"} font-medium transition ${active ? "bg-white text-ink shadow-card dark:bg-zinc-800 dark:text-white" : "text-ink-soft hover:bg-white/60 dark:text-zinc-400 dark:hover:bg-zinc-800/60"}`}>
+        {label}
+        {count > 0 && <span className="rounded-full bg-stone-200 px-1.5 text-[11px] font-semibold text-stone-600 dark:bg-zinc-800 dark:text-zinc-300">{count}</span>}
+      </Link>
+    );
+  };
+  const inMore = MORE.some(([h]) => path === h || path.startsWith(h + "/"));
   const items = (
     <nav className="space-y-0.5">
-      {ITEMS.map(([href, label]) => {
-        const active = href === "/" ? path === "/" : path.startsWith(href);
-        const count = href === "/" ? alertCount : href === "/tasks" ? suggestionCount : 0;
-        return (
-          <Link key={href} href={href} className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${active ? "bg-white text-ink shadow-card dark:bg-zinc-800 dark:text-white" : "text-ink-soft hover:bg-white/60 dark:text-zinc-400 dark:hover:bg-zinc-800/60"}`}>
-            {label}
-            {count > 0 && <span className="rounded-full bg-rose-100 px-1.5 text-[11px] font-semibold text-rose-700 dark:bg-rose-950 dark:text-rose-300">{count}</span>}
-          </Link>
-        );
-      })}
+      {MAIN.map((i) => link(i))}
+      <details className="pt-3" open={inMore}>
+        <summary className="cursor-pointer select-none px-3 py-1 text-xs font-medium uppercase tracking-wide faint">More</summary>
+        <div className="mt-1 space-y-0.5">{MORE.map((i) => link(i, true))}</div>
+      </details>
     </nav>
   );
   return (
