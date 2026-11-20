@@ -4,6 +4,7 @@ import { mergeRules, type RuleConfig } from "../rules/config";
 import type { ChangeEvent, CsState, SourceSnapshot, SyncRun } from "../types";
 import type { AiSummaryRecord, AppUser, AuditEntry, Repo } from "./repo";
 import type { SheetClientLink, SheetData } from "../sheets/rent";
+import type { UnitTracking } from "../tracking";
 
 const PAGE = 1000;
 async function all<T>(q: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -97,6 +98,15 @@ export class SupabaseRepo implements Repo {
   }
   async saveSheetLink(l: SheetClientLink, a: AppUser) {
     ok(await this.db.from("sheet_client_links").upsert({ id: l.sheetClient, client_id: l.clientId, status: l.status, updated_by: a.id, updated_at: new Date().toISOString() }));
+  }
+
+  async getUnitTracking(): Promise<UnitTracking[]> {
+    const { data, error } = await this.db.from("unit_tracking").select("*");
+    if (error) return [];
+    return (data ?? []).map((r) => ({ id: r.id, clientId: r.client_id, leaseStart: r.lease_start, launchCallBooked: r.launch_call_booked, launchedOn: r.launched_on, checkinDone: r.checkin_done }));
+  }
+  async saveUnitTracking(t: UnitTracking, a: AppUser) {
+    ok(await this.db.from("unit_tracking").upsert({ id: t.id, client_id: t.clientId, lease_start: t.leaseStart, launch_call_booked: t.launchCallBooked, launched_on: t.launchedOn, checkin_done: t.checkinDone, updated_by: a.id, updated_at: new Date().toISOString() }));
   }
 
   async saveTask(t: CsState["tasks"][number], a: AppUser) {
