@@ -67,7 +67,7 @@ export default async function Home({ searchParams }: { searchParams: { churned?:
             return (
               <div key={c.key} className="rounded-lg border border-stone-200 p-3 dark:border-zinc-800">
                 <div className="mb-2 flex items-center justify-between text-sm font-medium">{c.label}<Badge tone={list.length ? "blue" : "gray"}>{list.length}</Badge></div>
-                <ul className="space-y-1 text-sm">
+                <ul className="max-h-72 space-y-1 overflow-y-auto pr-1 text-sm">
                   {list.map((v) => <li key={v.client.mondayItemId}><Link href={`/clients?q=${encodeURIComponent(v.client.name)}`} className="hover:underline">{v.client.name}</Link></li>)}
                   {!list.length && <li className="text-xs faint">—</li>}
                 </ul>
