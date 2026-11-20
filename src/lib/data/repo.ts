@@ -1,5 +1,6 @@
 import type { RuleConfig } from "../rules/config";
 import type { SheetClientLink, SheetData } from "../sheets/rent";
+import type { UnitTracking } from "../tracking";
 import type {
   AiSuggestion, BoardMapping, ChangeEvent, CsCommunication, CsHealthAssessment, CsMilestoneRecord,
   CsNote, CsState, CsTask, SourceSnapshot, SyncRun,
@@ -50,6 +51,7 @@ export interface Repo {
   /** Client units from the rent Google Sheet (read-only copy). */
   getSheetUnits(): Promise<SheetData | null>;
   getSheetLinks(): Promise<SheetClientLink[]>;
+  getUnitTracking(): Promise<UnitTracking[]>;
 
   // ---- CS writes (never touch source data)
   saveTask(t: CsTask, actor: AppUser): Promise<void>;
@@ -63,6 +65,7 @@ export interface Repo {
   saveSummary(s: AiSummaryRecord): Promise<void>;
   setLastSeen(userId: string, at: string): Promise<void>;
   saveSheetLink(l: SheetClientLink, actor: AppUser): Promise<void>;
+  saveUnitTracking(t: UnitTracking, actor: AppUser): Promise<void>;
   audit(actor: AppUser | "system", action: string, entity: string, detail: string): Promise<void>;
 
   // ---- sync (service role only)
