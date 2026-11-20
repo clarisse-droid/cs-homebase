@@ -171,3 +171,24 @@ export async function linkSheetClient(fd: FormData) {
   await repo.saveSheetLink({ sheetClient: v.sheetClient, clientId: v.action === "link" ? v.clientId : null, status: v.action === "link" ? "linked" : v.action === "ignore" ? "ignored" : "removed" }, user);
   revalidatePath("/", "layout");
 }
+
+/** Save a unit's launch timing (lease start, launch call booked, launched, 45-day check-in). Empty field = clear it. */
+export async function saveUnitTiming(fd: FormData) {
+  const { repo, user } = await requireUser([...CS]);
+  const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable();
+  const today = new Date().toISOString().slice(0, 10);
+  const id_ = z.string().min(3).max(400).parse(fd.get("id"));
+  const prev = (await repo.getUnitTracking()).find((x) => x.id === id_);
+  const pick = (k: string, cur: string | null | undefined) => (fd.has(k) ? day.parse(opt(fd.get(k))) : cur ?? null);
+  const quick = opt(fd.get("quick")); // one-click: "launchCallBooked" | "checkinDone" | "launchedOn" → today
+  const t = {
+    id: id_,
+    clientId: z.string().max(64).nullable().parse(opt(fd.get("clientId"))) ?? prev?.clientId ?? null,
+    leaseStart: pick("leaseStart", prev?.leaseStart),
+    launchCallBooked: quick === "launchCallBooked" ? today : pick("launchCallBooked", prev?.launchCallBooked),
+    launchedOn: quick === "launchedOn" ? today : pick("launchedOn", prev?.launchedOn),
+    checkinDone: quick === "checkinDone" ? today : pick("checkinDone", prev?.checkinDone),
+  };
+  await repo.saveUnitTracking(t, user);
+  revalidatePath("/", "layout");
+}
