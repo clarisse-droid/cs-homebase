@@ -1,140 +1,81 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { loadPortfolio } from "@/lib/server/portfolio";
-import { buildBriefing } from "@/lib/rules/briefing";
-import { Badge, Card, Empty, Stat, fmtDate, fmtDateTime, riskTone, unitLabel } from "@/components/ui";
-import { Filters } from "@/components/filters";
-import { AiBriefing, MarkSeen } from "@/components/client-bits";
+import { buildClientUnits } from "@/lib/server/simple";
 import { JOURNEY_STAGES } from "@/lib/types";
-import { applyFilters } from "@/lib/filters";
+import { Badge, Card, Empty, fmtDate } from "@/components/ui";
+import { QuickDone } from "@/components/unit-timing";
 
-export default async function Dashboard({ searchParams }: { searchParams: Record<string, string | undefined> }) {
+export default async function Home({ searchParams }: { searchParams: { churned?: string } }) {
   const p = await loadPortfolio();
   if (!p.user) redirect("/login");
-  const { views, metrics, cs, changes, now, repo, user } = p;
-  const lastSeen = (await repo.getLastSeen(user.id)) ?? new Date(now.getTime() - 86_400_000).toISOString();
-  const briefing = buildBriefing(views, cs, changes, now);
-  const filtered = applyFilters(views.filter((v) => v.isActive), searchParams);
-  const alerts = filtered.flatMap((v) => v.risks.map((r) => ({ r, v }))).sort((a, b) => order(a.r.severity) - order(b.r.severity));
-  const since = changes.filter((e) => e.at > lastSeen).slice(0, 30);
-  const name = (id: string) => views.find((v) => v.client.mondayItemId === id)?.client.name ?? id;
-  const s = metrics.byStage;
-  const stageStat = (k: string) => s[k] ?? 0;
-  const csms = [...new Set(views.flatMap((v) => v.client.csmNames))].sort();
+  const canWrite = p.user.role !== "viewer";
+  const active = p.views.filter((v) => v.isActive);
+  const units = buildClientUnits(active, p.sheetMatch, p.tracking, p.now);
+  const nameOf = new Map(active.map((v) => [v.client.mondayItemId, v.client.name]));
+
+  const todo = [...units.values()].flat().flatMap((r) => r.plan.flags.map((f) => ({ r, f }))).sort((a, b) => a.f.due.localeCompare(b.f.due));
+  const launchCalls = todo.filter((x) => x.f.kind === "book_launch_call");
+  const checkins = todo.filter((x) => x.f.kind === "checkin");
+
+  const columns = [
+    ...JOURNEY_STAGES.map((s) => ({ key: s.key as string, label: s.label })),
+    { key: "unpaid", label: "No Payment" },
+    { key: "none", label: "Needs Verification" },
+    ...(searchParams.churned === "1" ? [{ key: "churned", label: "Churned" }] : []),
+  ];
+  const pool = searchParams.churned === "1" ? p.views : active;
+  const byStage = (k: string) => pool.filter((v) => (v.current ?? "none") === k).sort((a, b) => a.client.name.localeCompare(b.client.name));
+
+  const TodoList = ({ items, step, label, empty }: { items: typeof todo; step: "launchCallBooked" | "checkinDone"; label: string; empty: string }) =>
+    items.length === 0 ? <Empty>{empty}</Empty> : (
+      <ul className="divide-y divide-stone-100 dark:divide-zinc-800">
+        {items.map(({ r, f }) => (
+          <li key={r.trackId + f.kind} className="flex flex-wrap items-center gap-3 px-5 py-2.5 text-sm">
+            <div className="min-w-[14rem] flex-1">
+              <Link href={`/clients?q=${encodeURIComponent(nameOf.get(r.clientId) ?? "")}`} className="font-medium hover:underline">{nameOf.get(r.clientId)}</Link>
+              <span className="muted"> · {r.name}</span>
+            </div>
+            <Badge tone={f.overdue ? "red" : "amber"}>{f.overdue ? "Overdue · " : "Due "}{fmtDate(f.due)}</Badge>
+            {canWrite && <QuickDone r={r} step={step} label={label} />}
+          </li>
+        ))}
+      </ul>
+    );
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Good {now.getUTCHours() < 10 ? "morning" : now.getUTCHours() < 16 ? "afternoon" : "evening"}{user.name ? `, ${user.name.split(" ")[0]}` : ""}</h1>
-          <p className="text-sm muted">{fmtDate(now.toISOString())} · every number below is calculated from synced records. Hover a tile to see how.</p>
-        </div>
-        <Filters csms={csms} />
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Home</h1>
+        <p className="text-sm muted">What needs doing, and where every client is. Launch target = lease start + 14 days; check-in = launch + 45 days.</p>
       </div>
 
-      <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide faint">Portfolio</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <Stat label="Active clients" value={metrics.activeClients} hint="Master Client Sheet clients whose status is not Churn and not empty" />
-          <Stat label="Onboarding" value={stageStat("onboarding_call")} hint="Status: Onboarding" />
-          <Stat label="Business structure" value={stageStat("business_structure")} hint="Status: Onboarding Call Completed / Structure Setup" />
-          <Stat label="Lease application" value={stageStat("lease_application")} hint="Not tracked as a status in Monday. Shows 0 unless rules are configured" />
-          <Stat label="Actively looking" value={stageStat("actively_looking")} hint="Status: Actively Looking" />
-          <Stat label="Properties selected" value={stageStat("units_chosen")} hint="Clients currently in the Unit(s) Chosen stage" />
-          <Stat label="In unit setup" value={stageStat("unit_setup")} hint="Status: Setting up units" />
-          <Stat label="Ready for launch" value={views.filter((v) => v.isActive && v.units.length > 0 && v.units.every((u) => u.status === "ready_for_launch" || u.status === "operating") && v.current !== "operating").length} hint="Clients not yet operating whose every unit is Ready for Launch or Operating" tone="green" />
-          <Stat label="Operating" value={stageStat("operating")} hint="Status: Active" />
-          <Stat label="Need attention" value={metrics.requiringAttention} hint="Clients with at least one high or medium alert" tone={metrics.requiringAttention ? "red" : undefined} />
-        </div>
-        {stageStat("unpaid") > 0 && <p className="mt-2 text-xs text-rose-600">{stageStat("unpaid")} client(s) have status “No Payment”.</p>}
-      </section>
-
-      <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide faint">Units</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <Stat label="Total units" value={metrics.units.total} hint="Properties linked to active clients, plus mapped setup boards with no linked property" />
-          <Stat label="In setup" value={metrics.units.inSetup} />
-          <Stat label="Ready to launch" value={metrics.units.readyForLaunch} tone="green" />
-          <Stat label="Operating" value={metrics.units.operating} />
-          <Stat label="Blocked" value={metrics.units.blocked} tone={metrics.units.blocked ? "red" : undefined} />
-          <Stat label="Needs verification" value={metrics.units.needsVerification} hint="No setup board mapped yet. Link one in Settings → Board links" tone={metrics.units.needsVerification ? "amber" : undefined} />
-        </div>
-      </section>
-
-      <div className="grid gap-6 xl:grid-cols-5">
-        <Card className="xl:col-span-3" title={`Priority alerts (${alerts.length})`} action={<span className="text-xs faint">Deterministic rules · thresholds in Settings</span>}>
-          {alerts.length === 0 ? <Empty>No alerts match these filters.</Empty> : (
-            <ul className="divide-y divide-stone-100 dark:divide-zinc-800">
-              {alerts.slice(0, 40).map(({ r, v }) => (
-                <li key={r.id} className="flex items-start gap-3 px-5 py-3">
-                  <Badge tone={riskTone[r.severity]}>{r.severity}</Badge>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm"><Link href={`/clients/${v.client.mondayItemId}`} className="font-medium hover:underline">{v.client.name}</Link> · {r.title}</div>
-                    <div className="truncate text-xs muted">{r.detail}</div>
-                  </div>
-                  {r.url && <a href={r.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs link">Source ↗</a>}
-                </li>
-              ))}
-            </ul>
-          )}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title={`Book launch call (${launchCalls.length})`} action={<span className="text-xs faint">Lease started, call not booked yet</span>}>
+          <TodoList items={launchCalls} step="launchCallBooked" label="Booked ✓" empty="No launch calls to book." />
         </Card>
-
-        <div className="space-y-6 xl:col-span-2">
-          <Card title="Daily briefing" action={<span className="text-xs faint">{briefing.date}</span>}>
-            <div className="space-y-4 px-5 py-4 text-sm">
-              <Row label="Progressed (24h)">{briefing.progressed.length ? briefing.progressed.map((x, i) => <div key={i}><Link className="link" href={`/clients/${x.clientId}`}>{x.name}</Link> · {x.what}</div>) : <span className="faint">None recorded</span>}</Row>
-              <Row label="Became blocked (24h)">{briefing.becameBlocked.length ? briefing.becameBlocked.map((x, i) => <div key={i} className="text-rose-600">{x.name} · {x.what}</div>) : <span className="faint">None</span>}</Row>
-              <Row label="Units nearing launch">{briefing.nearingLaunch.length ? briefing.nearingLaunch.slice(0, 6).map((x, i) => <div key={i}>{x.name} · {x.unit} <span className="faint">{x.pct}%</span></div>) : <span className="faint">None</span>}</Row>
-              <Row label="Next 7 days & overdue promises">{briefing.upcoming.length ? briefing.upcoming.slice(0, 6).map((x, i) => <div key={i}><span className={x.when.slice(0, 10) < briefing.date ? "text-rose-600" : "faint"}>{x.when.slice(0, 10) < briefing.date ? "Overdue " : ""}{fmtDate(x.when)}</span> · {x.name}: {x.what}</div>) : <span className="faint">Nothing scheduled</span>}</Row>
-              <Row label="CS follow-ups"><Link href="/tasks" className="link">{briefing.csFollowUps.open} open · {briefing.csFollowUps.overdue} overdue · {briefing.csFollowUps.dueToday} due today</Link></Row>
-              <AiBriefing />
-            </div>
-          </Card>
-
-          <Card title={`Since your last visit (${since.length})`} action={<MarkSeen />}>
-            {since.length === 0 ? <Empty>No changes since {fmtDateTime(lastSeen)}.</Empty> : (
-              <ul className="max-h-80 divide-y divide-stone-100 overflow-auto text-sm dark:divide-zinc-800">
-                {since.map((e) => (
-                  <li key={e.id} className="px-5 py-2.5">
-                    <div className="flex justify-between gap-2"><span className="font-medium">{e.clientIds.map(name).join(", ") || "—"}</span><span className="shrink-0 text-xs faint">{fmtDateTime(e.at)}</span></div>
-                    <div className="text-xs muted">{e.field}: <s className="faint">{e.previousValue ?? "—"}</s> → {e.newValue ?? "—"}</div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
+        <Card title={`45-day check-ins (${checkins.length})`} action={<span className="text-xs faint">Shown from a week before they&apos;re due</span>}>
+          <TodoList items={checkins} step="checkinDone" label="Done ✓" empty="No check-ins due." />
+        </Card>
       </div>
 
-      <Card title="Clients by stage">
-        <div className="grid gap-px overflow-hidden rounded-b-xl bg-stone-100 sm:grid-cols-2 lg:grid-cols-5 dark:bg-zinc-800">
-          {JOURNEY_STAGES.map((st) => {
-            const list = filtered.filter((v) => v.current === st.key);
+      <Card title="Clients by stage" action={<Link className="link text-xs" href={searchParams.churned === "1" ? "/" : "/?churned=1"}>{searchParams.churned === "1" ? "Hide" : "Show"} churned</Link>}>
+        <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+          {columns.map((c) => {
+            const list = byStage(c.key);
+            if (!list.length && ["unpaid", "none"].includes(c.key)) return null;
             return (
-              <div key={st.key} className="bg-white p-3 dark:bg-zinc-900">
-                <div className="mb-2 flex justify-between text-xs font-medium muted"><span>{st.label}</span><span>{list.length}</span></div>
-                <div className="space-y-1">
-                  {list.slice(0, 6).map((v) => (
-                    <Link key={v.client.mondayItemId} href={`/clients/${v.client.mondayItemId}`} className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-xs hover:bg-stone-50 dark:hover:bg-zinc-800">
-                      <span className="truncate">{v.client.name}</span>
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${v.riskLevel === "high" ? "bg-rose-500" : v.riskLevel === "medium" ? "bg-amber-500" : "bg-emerald-500"}`} />
-                    </Link>
-                  ))}
-                  {list.length > 6 && <Link href={`/clients?stage=${st.key}`} className="block px-2 text-xs link">+{list.length - 6} more</Link>}
-                </div>
+              <div key={c.key} className="rounded-lg border border-stone-200 p-3 dark:border-zinc-800">
+                <div className="mb-2 flex items-center justify-between text-sm font-medium">{c.label}<Badge tone={list.length ? "blue" : "gray"}>{list.length}</Badge></div>
+                <ul className="space-y-1 text-sm">
+                  {list.map((v) => <li key={v.client.mondayItemId}><Link href={`/clients?q=${encodeURIComponent(v.client.name)}`} className="hover:underline">{v.client.name}</Link></li>)}
+                  {!list.length && <li className="text-xs faint">—</li>}
+                </ul>
               </div>
             );
           })}
         </div>
       </Card>
-      <p className="text-xs faint">Unit statuses: {Object.values(unitLabel).join(" · ")}. Readiness % = done ÷ counted tasks; see a unit for its formula.</p>
     </div>
   );
 }
-
-const order = (s: string) => ({ high: 0, medium: 1, low: 2, info: 3 })[s as "high"] ?? 4;
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div><div className="mb-0.5 text-xs font-medium faint">{label}</div><div className="space-y-0.5">{children}</div></div>;
-}
-
